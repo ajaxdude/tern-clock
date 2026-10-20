@@ -3,14 +3,38 @@
 A live system clock in Tern's tab bar. 12-hour or 24-hour, optional seconds,
 in one of four positions, chosen from a picker and remembered for good.
 
+## Why
+
+A headless Fedora/GNOME system has no panel, no menu bar, no desktop — nothing
+draws the time anywhere on screen, and GNOME's clock lives in a shell that a
+headless session never shows. Tern windows are what these machines are used
+through all day, so the clock belongs there: this plugin puts the system time
+in Tern's tab bar, with 12h/24h format and a position of your choosing.
+
 ## Install
 
+Needs Tern. The plugin is one folder with a `plugin.toml`.
+
+From GitHub (a copy in Tern's plugin directory):
+
 ```
-tern plugin link ~/ai/projects/tern_time
+tern plugin install github.com/ajaxdude/tern-clock
 ```
 
-(or `tern plugin install ~/ai/projects/tern_time` for a copy). Reloads live;
-remove with `tern plugin remove clock`.
+From a checkout (a live link — edit the files, reload, done):
+
+```
+git clone https://github.com/ajaxdude/tern-clock
+tern plugin link ./tern-clock
+```
+
+Installing links the plugin, the daemon loads it, and every window shows the
+clock within a second — no restart. Check with `tern plugin list`; reload a
+changed link with `tern plugin reload`. Uninstall:
+
+```
+tern plugin remove clock
+```
 
 ## Use
 
