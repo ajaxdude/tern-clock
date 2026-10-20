@@ -1,0 +1,5 @@
+/* Clock: in-flow status-line segment (also reaches the web tab, where no
+   window VM runs; the tab-bar placements come from the window VM's CSS). */
+.sl-plugin[data-plugin="clock"] {
+	font-variant-numeric: tabular-nums;
+}

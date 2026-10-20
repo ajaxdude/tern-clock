@@ -1,0 +1,7 @@
+schema = 1
+id = "clock"
+name = "Clock"
+version = "1.0.0"
+description = "A system clock in the tab bar: 12h/24h, left, centered, beside the window buttons, or in the status line"
+window = "window.luau"
+styles = ["styles/clock.css"]
