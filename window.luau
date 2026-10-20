@@ -244,7 +244,12 @@ tern.command({
 	end,
 })
 
-tern.on("window_start", function(_cx)
+-- The clock is a status-line segment; its host must exist (the placement CSS
+-- lifts it out of the bottom bar into the tab bar).
+tern.on("window_start", function(cx)
+	if not cx.settings:get("status_bar") then
+		cx.settings:set("status_bar", true)
+	end
 	apply_css(get_cfg())
 	schedule()
 	tick()

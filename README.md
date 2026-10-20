@@ -38,14 +38,14 @@ it reads best.
 
 ## Notes
 
-- Time is the machine's local time (`os.date` in the plugin VM; the daemon
-  machine is the clock source for every window).
+- Time is the machine's local time (`os.date` in the plugin VM; the window
+  follows the daemon host's zone and DST).
 - Redraws are driven by one timer per window, armed to the next wall-clock
   second (with seconds) or minute (without); no polling between.
-- The web tab runs no plugin window VM, so the clock shows in desktop windows
-  and headless `tern serve` sessions show it when a desktop window attaches.
-
-## Layout
+- The web tab runs no plugin window VM, so the clock shows in desktop windows;
+  a headless `tern serve` session shows it once a desktop window attaches.
+- The clock rides on the status line's segment host, so loading it turns
+  Settings → **Show status line** on; that is the only setting it touches.
 
 ```
 plugin.toml        manifest (window-only plugin + one style sheet)
