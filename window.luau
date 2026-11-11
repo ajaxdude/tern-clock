@@ -14,10 +14,6 @@ local PLACE_TITLES = {
 }
 local FMT_TITLES = { ["24h"] = "24-hour (15:42)", ["12h"] = "12-hour (3:42 pm)" }
 
--- Anchors for turning the monotonic clock into sub-second wall time.
-local anchor_sec = os.time()
-local anchor_ms = tern.now()
-
 local function get_cfg()
 	return {
 		fmt = tern.kv.get("fmt") or DEFAULT_FMT,
@@ -158,32 +154,87 @@ local function next_place(place)
 	return DEFAULT_PLACE
 end
 
--- One tick: keep the CSS in step with live settings and redraw the chrome.
+-- Redraws fire just after each wall-clock boundary: every second with
+-- seconds shown, otherwise every minute. os.time() floors to whole seconds,
+-- so the sub-second phase comes from tern.now(), the VM's monotonic clock.
+-- That clock and the OS wall clock share no common origin, so the offset
+-- between them is not assumed, it is measured: a firing whose scheduled
+-- whole second had not yet appeared in os.time() proves the phase estimate
+-- ran hot, so the estimate is shifted later; a firing that landed on its
+-- second nudges it back earlier. The estimate converges within a few
+-- firings and NTP slew or steps, a suspended VM, or a throttled timer are
+-- absorbed the same way instead of accumulating. The text itself is drawn
+-- from the wall clock, so a firing delayed by a stalled event loop can only
+-- make it lag, never run ahead.
+local schedule -- forward
+local timer = nil -- the pending redraw timer
+local gen = 0 -- schedule generation; a new one supersedes a fired chain
+local last_period = nil -- the period the chain is armed for
+
+local bias_ms = 0 -- learned offset aligning the monotonic phase to the wall clock
+
+local function wall_ms()
+	local frac = math.fmod(tern.now() * 1000 - bias_ms, 1000)
+	if frac < 0 then
+		frac += 1000
+	end
+	return os.time() * 1000 + frac
+end
+
+-- One tick: keep CSS and scheduler in step with live settings and redraw.
 local function tick()
 	local cfg = get_cfg()
 	apply_css(cfg)
+	local period = cfg.seconds and 1000 or 60000
+	if period ~= last_period then
+		last_period = period
+		schedule(period)
+	end
 	tern.chrome.refresh()
 end
 
--- Milliseconds until the next wall-clock second (with seconds) or minute,
--- from the monotonic clock anchored to wall time at load.
-local function ms_to_boundary(seconds)
-	local phase = tern.now() - anchor_ms
-	local sec_now = anchor_sec + math.floor(phase / 1000)
-	local into_sec = math.fmod(phase, 1000)
-	if seconds then
-		return 1000 - into_sec + 4
+schedule = function(period)
+	gen += 1
+	local my_gen = gen
+	if timer then
+		timer:cancel() -- no effect once it has fired
 	end
-	local into_min = math.fmod(sec_now, 60) * 1000 + into_sec
-	return 60000 - into_min + 4
-end
-
-local function schedule()
-	local cfg = get_cfg()
-	tern.timer(ms_to_boundary(cfg.seconds), function(_cx)
-		tick()
-		schedule()
+	timer = nil
+	if not period then
+		period = get_cfg().seconds and 1000 or 60000
+	end
+	local now = wall_ms()
+	local wait = period - math.fmod(now, period) -- in (0, period]
+	local target = math.floor((now + wait) / 1000) -- whole wall second this firing aims at
+	local handle
+	handle = tern.timer(wait + 16, function(_cx) -- +16 ms: land past the boundary
+		local ok, err = pcall(tick)
+		if not ok then
+			tern.log.warn("clock: redraw failed: " .. tostring(err))
+		end
+		if gen ~= my_gen then
+			return -- tick re-armed for a new cadence; the new chain owns the state
+		end
+		local landed = os.time()
+		if landed < target then
+			bias_ms += 512 -- fired before the real boundary: estimate ran hot
+		elseif landed == target then
+			-- The firing is on target, so the sub-second part of the aligned
+			-- estimate is the latency the event loop cost this time. Cancel half
+			-- of it from the next firing; updates then land a hair after the
+			-- boundary instead of dragging out up to a full second, which is
+			-- what makes the seconds hand look smooth.
+			local lag = math.fmod(wall_ms(), 1000) - 16
+			if lag > 0 then
+				bias_ms -= lag * 3 / 4
+			end
+		end
+		if timer == handle then
+			timer = nil
+		end
+		schedule(period)
 	end)
+	timer = handle
 end
 
 tern.chrome.status(function(_pane)
@@ -250,7 +301,5 @@ tern.on("window_start", function(cx)
 	if not cx.settings:get("status_bar") then
 		cx.settings:set("status_bar", true)
 	end
-	apply_css(get_cfg())
-	schedule()
-	tick()
+	tick() -- installs the CSS and arms the redraw chain
 end)

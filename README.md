@@ -38,8 +38,10 @@ tern plugin remove clock
 
 ## Use
 
-- **Click the clock** (in the bar, or the segment in the status line) to open
-  its settings picker: format, position, seconds.
+- **Click the clock** — in the status-line placement it is a button: one click
+  opens the settings picker (format, position, seconds). Tab-bar placements sit
+  on the bar's window-drag strip, where Tern routes clicks to window dragging
+  before any foreign element, so there the clock is a display; use the palette.
 - Palette: **Clock: settings…**, **Clock: toggle 12h / 24h**, **Clock: change
   position** (cycles all four).
 
