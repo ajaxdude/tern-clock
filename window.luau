@@ -172,6 +172,9 @@ local gen = 0 -- schedule generation; a new one supersedes a fired chain
 local last_period = nil -- the period the chain is armed for
 
 local bias_ms = 0 -- learned offset aligning the monotonic phase to the wall clock
+local cfg_cache = nil -- last settings read; the status hook must not cross the
+                      -- plugin boundary (kv reads are native and budgeted at 40 ms)
+local last_fire = os.time() -- when the redraw chain was last known alive
 
 local function wall_ms()
 	local frac = math.fmod(tern.now() * 1000 - bias_ms, 1000)
@@ -184,6 +187,8 @@ end
 -- One tick: keep CSS and scheduler in step with live settings and redraw.
 local function tick()
 	local cfg = get_cfg()
+	cfg_cache = cfg
+	last_fire = os.time()
 	apply_css(cfg)
 	local period = cfg.seconds and 1000 or 60000
 	if period ~= last_period then
@@ -203,6 +208,7 @@ schedule = function(period)
 	if not period then
 		period = get_cfg().seconds and 1000 or 60000
 	end
+	last_fire = os.time()
 	local now = wall_ms()
 	local wait = period - math.fmod(now, period) -- in (0, period]
 	local target = math.floor((now + wait) / 1000) -- whole wall second this firing aims at
@@ -238,7 +244,14 @@ schedule = function(period)
 end
 
 tern.chrome.status(function(_pane)
-	local cfg = get_cfg()
+	local cfg = cfg_cache or get_cfg()
+	local period_s = cfg.seconds and 1 or 60
+	if os.time() - last_fire > period_s + 2 then
+		-- The renderer can revoke a plugin hook for running over budget, which
+		-- kills whatever the callback was doing — including its re-arm. Any
+		-- repaint is a chance to notice the chain stopped and start it again.
+		schedule(cfg.seconds and 1000 or 60000)
+	end
 	return { {
 		text = clock_text(cfg),
 		icon = "clock",
@@ -301,5 +314,8 @@ tern.on("window_start", function(cx)
 	if not cx.settings:get("status_bar") then
 		cx.settings:set("status_bar", true)
 	end
-	tick() -- installs the CSS and arms the redraw chain
+	local ok, err = pcall(tick) -- installs the CSS and arms the redraw chain
+	if not ok then
+		tern.log.warn("clock: start failed: " .. tostring(err))
+	end
 end)
