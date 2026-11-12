@@ -18,18 +18,17 @@ local function get_cfg()
 	return {
 		fmt = tern.kv.get("fmt") or DEFAULT_FMT,
 		place = tern.kv.get("place") or DEFAULT_PLACE,
-		seconds = tern.kv.get("seconds") == true,
 	}
 end
 
 local function clock_text(cfg)
 	local s
 	if cfg.fmt == "12h" then
-		s = os.date(cfg.seconds and "%I:%M:%S %p" or "%I:%M %p")
+		s = os.date("%I:%M %p")
 		s = (s:gsub("^0", ""))
 		s = (s:gsub("([AP])M", function(c) return c:lower() .. "m" end))
 	else
-		s = os.date(cfg.seconds and "%H:%M:%S" or "%H:%M")
+		s = os.date("%H:%M")
 	end
 	return s
 end
@@ -134,11 +133,11 @@ html.csd:not(.tabs-v) #tabbar {
 	return table.concat(sheet)
 end
 
-local applied = nil -- "place|fmt|seconds" signature of the installed CSS
+local applied = nil -- "place|fmt" signature of the installed CSS
 
 local function apply_css(cfg)
 	local text = clock_text(cfg)
-	local sig = cfg.place .. "|" .. cfg.fmt .. "|" .. tostring(cfg.seconds)
+	local sig = cfg.place .. "|" .. cfg.fmt
 	if sig ~= applied then
 		applied = sig
 		tern.css(ID, css_text(cfg.place, text))
@@ -154,8 +153,8 @@ local function next_place(place)
 	return DEFAULT_PLACE
 end
 
--- Redraws fire just after each wall-clock boundary: every second with
--- seconds shown, otherwise every minute. os.time() floors to whole seconds,
+-- Redraws fire just after each wall-clock minute boundary. os.time() floors
+-- to whole seconds,
 -- so the sub-second phase comes from tern.now(), the VM's monotonic clock.
 -- That clock and the OS wall clock share no common origin, so the offset
 -- between them is not assumed, it is measured: a firing whose scheduled
@@ -169,7 +168,8 @@ end
 local schedule -- forward
 local timer = nil -- the pending redraw timer
 local gen = 0 -- schedule generation; a new one supersedes a fired chain
-local last_period = nil -- the period the chain is armed for
+
+local PERIOD = 60000 -- repaint cadence: once per wall-clock minute
 
 local bias_ms = 0 -- learned offset aligning the monotonic phase to the wall clock
 local cfg_cache = nil -- last settings read; the status hook must not cross the
@@ -184,33 +184,25 @@ local function wall_ms()
 	return os.time() * 1000 + frac
 end
 
--- One tick: keep CSS and scheduler in step with live settings and redraw.
+-- One tick: keep CSS and settings in step with the kv and redraw.
 local function tick()
 	local cfg = get_cfg()
 	cfg_cache = cfg
 	last_fire = os.time()
 	apply_css(cfg)
-	local period = cfg.seconds and 1000 or 60000
-	if period ~= last_period then
-		last_period = period
-		schedule(period)
-	end
 	tern.chrome.refresh()
 end
 
-schedule = function(period)
+schedule = function()
 	gen += 1
 	local my_gen = gen
 	if timer then
 		timer:cancel() -- no effect once it has fired
 	end
 	timer = nil
-	if not period then
-		period = get_cfg().seconds and 1000 or 60000
-	end
 	last_fire = os.time()
 	local now = wall_ms()
-	local wait = period - math.fmod(now, period) -- in (0, period]
+	local wait = PERIOD - math.fmod(now, PERIOD) -- in (0, PERIOD]
 	local target = math.floor((now + wait) / 1000) -- whole wall second this firing aims at
 	local handle
 	handle = tern.timer(wait + 16, function(_cx) -- +16 ms: land past the boundary
@@ -226,10 +218,9 @@ schedule = function(period)
 			bias_ms += 512 -- fired before the real boundary: estimate ran hot
 		elseif landed == target then
 			-- The firing is on target, so the sub-second part of the aligned
-			-- estimate is the latency the event loop cost this time. Cancel half
-			-- of it from the next firing; updates then land a hair after the
-			-- boundary instead of dragging out up to a full second, which is
-			-- what makes the seconds hand look smooth.
+			-- estimate is the latency the event loop cost this time. Cancel
+			-- most of it from the next firing, so updates keep landing a hair
+			-- after the boundary instead of drifting deeper into the minute.
 			local lag = math.fmod(wall_ms(), 1000) - 16
 			if lag > 0 then
 				bias_ms -= lag * 3 / 4
@@ -238,19 +229,18 @@ schedule = function(period)
 		if timer == handle then
 			timer = nil
 		end
-		schedule(period)
+		schedule()
 	end)
 	timer = handle
 end
 
 tern.chrome.status(function(_pane)
 	local cfg = cfg_cache or get_cfg()
-	local period_s = cfg.seconds and 1 or 60
-	if os.time() - last_fire > period_s + 2 then
+	if os.time() - last_fire > 62 then
 		-- The renderer can revoke a plugin hook for running over budget, which
 		-- kills whatever the callback was doing — including its re-arm. Any
 		-- repaint is a chance to notice the chain stopped and start it again.
-		schedule(cfg.seconds and 1000 or 60000)
+		schedule()
 	end
 	return { {
 		text = clock_text(cfg),
@@ -273,14 +263,11 @@ tern.command({
 		for _, p in ipairs(PLACES) do
 			table.insert(items, { label = PLACE_TITLES[p], group = "Position", current = cfg.place == p, act = { place = p } })
 		end
-		table.insert(items, { label = "Seconds: off", group = "Seconds", current = not cfg.seconds, act = { seconds = false } })
-		table.insert(items, { label = "Seconds: on", group = "Seconds", current = cfg.seconds, act = { seconds = true } })
 		cx:pick({ items = items, placeholder = "time format and position" })
 			:next(function(choice)
 				if not choice then return end
 				if choice.act.fmt then tern.kv.set("fmt", choice.act.fmt) end
 				if choice.act.place then tern.kv.set("place", choice.act.place) end
-				if choice.act.seconds ~= nil then tern.kv.set("seconds", choice.act.seconds) end
 				tick()
 			end)
 	end,
@@ -314,8 +301,16 @@ tern.on("window_start", function(cx)
 	if not cx.settings:get("status_bar") then
 		cx.settings:set("status_bar", true)
 	end
-	local ok, err = pcall(tick) -- installs the CSS and arms the redraw chain
+	local ok, err = pcall(tick) -- installs the CSS
 	if not ok then
 		tern.log.warn("clock: start failed: " .. tostring(err))
 	end
+	schedule() -- arms the redraw chain
 end)
+
+-- A plugin reload replaces the module but runs no window_start, so the chain
+-- has to arm here too: otherwise a reloaded clock renders once and freezes.
+local ok_arm, err_arm = pcall(schedule)
+if not ok_arm then
+	tern.log.warn("clock: arm failed: " .. tostring(err_arm))
+end

@@ -1,6 +1,6 @@
 # Clock — a system-time plugin for Tern
 
-A live system clock in Tern's tab bar. 12-hour or 24-hour, optional seconds,
+A live system clock in Tern's tab bar. 12-hour or 24-hour,
 in one of four positions, chosen from a picker and remembered for good.
 
 ## Why
@@ -39,7 +39,7 @@ tern plugin remove clock
 ## Use
 
 - **Click the clock** — in the status-line placement it is a button: one click
-  opens the settings picker (format, position, seconds). Tab-bar placements sit
+  opens the settings picker (format, position). Tab-bar placements sit
   on the bar's window-drag strip, where Tern routes clicks to window dragging
   before any foreign element, so there the clock is a display; use the palette.
 - Palette: **Clock: settings…**, **Clock: toggle 12h / 24h**, **Clock: change
@@ -67,7 +67,7 @@ it reads best.
 - Time is the machine's local time (`os.date` in the plugin VM; the window
   follows the daemon host's zone and DST).
 - Redraws are driven by one timer per window, armed to the next wall-clock
-  second (with seconds) or minute (without); no polling between.
+  minute; no polling between.
 - The web tab runs no plugin window VM, so the clock shows in desktop windows;
   a headless `tern serve` session shows it once a desktop window attaches.
 - The clock rides on the status line's segment host, so loading it turns
